@@ -9,7 +9,7 @@ complaints with an ISP about degraded service.
 Usage:
     Server:  python3 packetloss.py server [--port 5201]
     Client:  python3 packetloss.py client <server_host> [options]
-    Report:  python3 packetloss.py report <logfile.jsonl>
+    Report:  python3 packetloss.py report <logfile> [logfile ...]
 """
 
 import argparse
@@ -398,18 +398,30 @@ def print_final_summary(tracker, elapsed):
 # Report — offline analysis of a log file
 # ---------------------------------------------------------------------------
 
-def run_report(logfile):
-    if not os.path.exists(logfile):
-        print(f"Error: {logfile} not found", file=sys.stderr)
-        sys.exit(1)
-
-    entries = list(iter_log(logfile))
+def run_report(logfiles):
+    entries = []
+    bursts = []
+    for logfile in logfiles:
+        if not os.path.exists(logfile):
+            print(f"Error: {logfile} not found", file=sys.stderr)
+            sys.exit(1)
+        file_entries = list(iter_log(logfile))
+        if not file_entries:
+            continue
+        # Sort within a file by seq so bursts are detected against the original
+        # send order. Cross-file seq numbers can collide, so we don't sort the
+        # combined list by seq.
+        file_entries.sort(key=lambda e: e["seq"])
+        bursts.extend(find_bursts(file_entries))
+        entries.extend(file_entries)
 
     if not entries:
-        print("No data in log file.")
+        print("No data in log file(s).")
         return
 
-    entries.sort(key=lambda e: e["seq"])
+    # Aggregate analysis runs across files; order chronologically by timestamp.
+    entries.sort(key=lambda e: e["epoch"])
+    bursts.sort(key=lambda b: b["start_epoch"])
 
     total = len(entries)
     lost_entries = [e for e in entries if e["lost"]]
@@ -423,7 +435,12 @@ def run_report(logfile):
     print("=" * 70)
     print("PACKET LOSS CHARACTERIZATION REPORT")
     print("=" * 70)
-    print(f"Log file:       {logfile}")
+    if len(logfiles) == 1:
+        print(f"Log file:       {logfiles[0]}")
+    else:
+        print(f"Log files:      {len(logfiles)} files")
+        for lf in logfiles:
+            print(f"                  {lf}")
     print(f"Period:         {first_ts.strftime('%Y-%m-%d %H:%M:%S')} to "
           f"{last_ts.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"Duration:       {duration}")
@@ -453,7 +470,6 @@ def run_report(logfile):
     print("\n" + "-" * 70)
     print("BURST ANALYSIS")
     print("-" * 70)
-    bursts = find_bursts(entries)
     if bursts:
         lengths = [b["length"] for b in bursts]
         durations_ms = [b["duration_ms"] for b in bursts]
@@ -722,8 +738,9 @@ def main():
                      help="Log file path (default: packetloss_TIMESTAMP.plct)")
 
     # Report
-    rpt = sub.add_parser("report", help="Analyze a log file")
-    rpt.add_argument("logfile", help="Path to .jsonl log file")
+    rpt = sub.add_parser("report", help="Analyze one or more log files")
+    rpt.add_argument("logfile", nargs="+",
+                     help="Path to one or more log files (combined into a single report)")
 
     args = parser.parse_args()
 
@@ -737,7 +754,7 @@ def main():
         run_client(args.host, args.port, args.interval, args.size,
                    args.timeout, args.duration, logfile)
     elif args.mode == "report":
-        run_report(args.logfile)
+        run_report(args.logfile)  # nargs="+" → list
 
 
 if __name__ == "__main__":
