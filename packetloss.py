@@ -331,21 +331,15 @@ def iter_log(logfile):
     with open(logfile, "rb") as fh:
         magic = fh.read(len(LOG_MAGIC))
         if magic == LOG_MAGIC:
-            while True:
-                buf = fh.read(LOG_RECORD_SIZE)
-                if len(buf) < LOG_RECORD_SIZE:
-                    break
-                seq, epoch, rtt_ms = struct.unpack(LOG_RECORD_FMT, buf)
-                lost = math.isnan(rtt_ms)
-                ts = datetime.datetime.fromtimestamp(epoch)
+            buf = fh.read()
+            isnan = math.isnan
+            for seq, epoch, rtt_ms in struct.iter_unpack(LOG_RECORD_FMT, buf):
+                lost = isnan(rtt_ms)
                 yield {
                     "seq": seq,
                     "epoch": epoch,
-                    "timestamp": ts.isoformat(),
-                    "rtt_ms": None if lost else round(float(rtt_ms), 3),
+                    "rtt_ms": None if lost else float(rtt_ms),
                     "lost": lost,
-                    "weekday": ts.strftime("%A"),
-                    "hour": ts.hour,
                 }
             return
         fh.seek(0)
@@ -422,8 +416,8 @@ def run_report(logfile):
     recv_entries = [e for e in entries if not e["lost"]]
     loss_pct = len(lost_entries) / total * 100 if total else 0
 
-    first_ts = datetime.datetime.fromisoformat(entries[0]["timestamp"])
-    last_ts = datetime.datetime.fromisoformat(entries[-1]["timestamp"])
+    first_ts = datetime.datetime.fromtimestamp(entries[0]["epoch"])
+    last_ts = datetime.datetime.fromtimestamp(entries[-1]["epoch"])
     duration = last_ts - first_ts
 
     print("=" * 70)
@@ -505,11 +499,20 @@ def run_report(logfile):
     print("-" * 70)
     hour_total = collections.Counter()
     hour_lost = collections.Counter()
+    day_total = collections.Counter()
+    day_lost = collections.Counter()
+    weekday_names = ["Monday", "Tuesday", "Wednesday", "Thursday",
+                     "Friday", "Saturday", "Sunday"]
+    localtime = time.localtime
     for e in entries:
-        h = e["hour"]
+        tm = localtime(e["epoch"])
+        h = tm.tm_hour
+        d = weekday_names[tm.tm_wday]
         hour_total[h] += 1
+        day_total[d] += 1
         if e["lost"]:
             hour_lost[h] += 1
+            day_lost[d] += 1
 
     print(f"{'Hour':>6}  {'Total':>8}  {'Lost':>8}  {'Loss%':>8}  Bar")
     for h in range(24):
@@ -523,18 +526,8 @@ def run_report(logfile):
     print("\n" + "-" * 70)
     print("LOSS BY DAY OF WEEK")
     print("-" * 70)
-    day_order = ["Monday", "Tuesday", "Wednesday", "Thursday",
-                 "Friday", "Saturday", "Sunday"]
-    day_total = collections.Counter()
-    day_lost = collections.Counter()
-    for e in entries:
-        d = e["weekday"]
-        day_total[d] += 1
-        if e["lost"]:
-            day_lost[d] += 1
-
     print(f"{'Day':>12}  {'Total':>8}  {'Lost':>8}  {'Loss%':>8}  Bar")
-    for d in day_order:
+    for d in weekday_names:
         t = day_total.get(d, 0)
         l = day_lost.get(d, 0)
         pct = (l / t * 100) if t > 0 else 0
@@ -562,7 +555,7 @@ def run_report(logfile):
         print("-" * 70)
         hour_rtts = collections.defaultdict(list)
         for e in recv_entries:
-            hour_rtts[e["hour"]].append(e["rtt_ms"])
+            hour_rtts[localtime(e["epoch"]).tm_hour].append(e["rtt_ms"])
         print(f"{'Hour':>6}  {'AvgRTT':>8}  {'p95RTT':>8}  {'Count':>8}")
         for h in range(24):
             if h in hour_rtts:
@@ -653,31 +646,31 @@ def find_worst_windows(entries, window_sec=300):
     if not entries:
         return []
 
+    n = len(entries)
     windows = []
-    start_idx = 0
-    epoch_key = lambda e: e["epoch"]
+    right = 0
+    total = 0
+    lost = 0
 
-    for i in range(len(entries)):
-        window_start = entries[i]["epoch"]
-        window_end = window_start + window_sec
-
-        # Find all entries in this window
-        total = 0
-        lost = 0
-        for j in range(i, len(entries)):
-            if entries[j]["epoch"] > window_end:
-                break
+    for left in range(n):
+        window_end = entries[left]["epoch"] + window_sec
+        while right < n and entries[right]["epoch"] <= window_end:
             total += 1
-            if entries[j]["lost"]:
+            if entries[right]["lost"]:
                 lost += 1
+            right += 1
 
         if total > 0 and lost > 0:
             windows.append({
-                "start": window_start,
+                "start": entries[left]["epoch"],
                 "total": total,
                 "lost": lost,
                 "loss_pct": lost / total * 100,
             })
+
+        total -= 1
+        if entries[left]["lost"]:
+            lost -= 1
 
     # Deduplicate overlapping windows — keep best per 5-min bucket
     if not windows:
