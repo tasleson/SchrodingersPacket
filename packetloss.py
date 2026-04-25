@@ -33,6 +33,13 @@ MAGIC = b"PLCT"  # Packet Loss Characterization Tool
 # Full wire format: 4-byte magic + header + padding
 MIN_PACKET = len(MAGIC) + HEADER_SIZE
 
+# Log file format: 8-byte file magic, then a stream of fixed 16-byte records.
+# Record layout: uint32 seq, double epoch, float32 rtt_ms.
+# A NaN rtt_ms marks a lost packet (no real RTT could ever be NaN).
+LOG_MAGIC = b"PLCTLOG\x01"
+LOG_RECORD_FMT = "<Idf"
+LOG_RECORD_SIZE = struct.calcsize(LOG_RECORD_FMT)
+
 DEFAULT_PORT = 5201
 DEFAULT_INTERVAL_MS = 100  # send a probe every 100 ms
 DEFAULT_PACKET_SIZE = 128  # bytes total on the wire
@@ -195,7 +202,11 @@ def run_client(host, port, interval_ms, packet_size, timeout_ms, duration,
 
     log_fh = None
     if logfile:
-        log_fh = open(logfile, "a")
+        new_file = (not os.path.exists(logfile)) or os.path.getsize(logfile) == 0
+        log_fh = open(logfile, "ab")
+        if new_file:
+            log_fh.write(LOG_MAGIC)
+            log_fh.flush()
         print(f"[client] logging to {logfile}")
 
     print(f"[client] target {server_addr[0]}:{server_addr[1]}  "
@@ -309,18 +320,39 @@ def run_client(host, port, interval_ms, packet_size, timeout_ms, duration,
 
 
 def log_entry(fh, result):
-    ts = datetime.datetime.fromtimestamp(result["send_ts"])
-    entry = {
-        "seq": result["seq"],
-        "timestamp": ts.isoformat(),
-        "epoch": result["send_ts"],
-        "rtt_ms": round(result["rtt_ms"], 3) if result["rtt_ms"] else None,
-        "lost": result["lost"],
-        "weekday": ts.strftime("%A"),
-        "hour": ts.hour,
-    }
-    fh.write(json.dumps(entry) + "\n")
+    rtt_ms = float("nan") if result["lost"] else result["rtt_ms"]
+    fh.write(struct.pack(LOG_RECORD_FMT, result["seq"], result["send_ts"], rtt_ms))
     fh.flush()
+
+
+def iter_log(logfile):
+    """Yield entry dicts from a log file. Reads the binary format, with a
+    fallback to legacy JSONL so older logs still work with `report`."""
+    with open(logfile, "rb") as fh:
+        magic = fh.read(len(LOG_MAGIC))
+        if magic == LOG_MAGIC:
+            while True:
+                buf = fh.read(LOG_RECORD_SIZE)
+                if len(buf) < LOG_RECORD_SIZE:
+                    break
+                seq, epoch, rtt_ms = struct.unpack(LOG_RECORD_FMT, buf)
+                lost = math.isnan(rtt_ms)
+                ts = datetime.datetime.fromtimestamp(epoch)
+                yield {
+                    "seq": seq,
+                    "epoch": epoch,
+                    "timestamp": ts.isoformat(),
+                    "rtt_ms": None if lost else round(float(rtt_ms), 3),
+                    "lost": lost,
+                    "weekday": ts.strftime("%A"),
+                    "hour": ts.hour,
+                }
+            return
+        fh.seek(0)
+        for raw in fh:
+            line = raw.strip()
+            if line:
+                yield json.loads(line)
 
 
 def print_rolling_stats(tracker, elapsed):
@@ -377,12 +409,7 @@ def run_report(logfile):
         print(f"Error: {logfile} not found", file=sys.stderr)
         sys.exit(1)
 
-    entries = []
-    with open(logfile) as fh:
-        for line in fh:
-            line = line.strip()
-            if line:
-                entries.append(json.loads(line))
+    entries = list(iter_log(logfile))
 
     if not entries:
         print("No data in log file.")
@@ -699,7 +726,7 @@ def main():
     cli.add_argument("--duration", type=int, default=None, metavar="SEC",
                      help="Run for N seconds then stop (default: until Ctrl-C)")
     cli.add_argument("--log", type=str, default=None, metavar="FILE",
-                     help="Log file path (default: packetloss_TIMESTAMP.jsonl)")
+                     help="Log file path (default: packetloss_TIMESTAMP.plct)")
 
     # Report
     rpt = sub.add_parser("report", help="Analyze a log file")
@@ -713,7 +740,7 @@ def main():
         logfile = args.log
         if logfile is None:
             ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            logfile = f"packetloss_{ts}.jsonl"
+            logfile = f"packetloss_{ts}.plct"
         run_client(args.host, args.port, args.interval, args.size,
                    args.timeout, args.duration, logfile)
     elif args.mode == "report":
