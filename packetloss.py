@@ -432,6 +432,22 @@ def run_report(logfiles):
     last_ts = datetime.datetime.fromtimestamp(entries[-1]["epoch"])
     duration = last_ts - first_ts
 
+    # Call-killing windows: 30s with >=5% loss. Computed up front so the
+    # total count can appear in the summary, then reused for the detail
+    # section further down.
+    vc_window_sec = 30
+    vc_loss_threshold = 5.0
+    vc_min_total = 20
+    all_vc_windows = [
+        w for w in find_worst_windows(
+            entries,
+            window_sec=vc_window_sec,
+            top_n=None,
+            min_total=vc_min_total,
+        )
+        if w["loss_pct"] >= vc_loss_threshold
+    ]
+
     print("=" * 70)
     print("PACKET LOSS CHARACTERIZATION REPORT")
     print("=" * 70)
@@ -448,6 +464,8 @@ def run_report(logfiles):
     print(f"Received:       {len(recv_entries)}")
     print(f"Lost:           {len(lost_entries)}")
     print(f"Overall loss:   {loss_pct:.2f}%")
+    print(f"Video call-killing windows ({vc_window_sec}s, >={vc_loss_threshold:.0f}% "
+          f"loss): {len(all_vc_windows)}")
 
     if recv_entries:
         rtts = [e["rtt_ms"] for e in recv_entries]
@@ -564,6 +582,23 @@ def run_report(logfiles):
               f"{ts.strftime('%A'):>10}  {w['total']:>7}  "
               f"{w['lost']:>6}  {w['loss_pct']:>6.2f}%")
 
+    # --- Video-conference call killer windows ---
+    print("\n" + "-" * 70)
+    print(f"TOP 25 CALL-KILLING WINDOWS ({vc_window_sec}s, "
+          f">={vc_loss_threshold:.0f}% loss — would tank a video call)")
+    print("-" * 70)
+    if all_vc_windows:
+        print(f"{'Start Time':>22}  {'Day':>10}  {'Total':>7}  "
+              f"{'Lost':>6}  {'Loss%':>7}")
+        for w in all_vc_windows[:25]:
+            ts = datetime.datetime.fromtimestamp(w["start"])
+            print(f"{ts.strftime('%Y-%m-%d %H:%M:%S'):>22}  "
+                  f"{ts.strftime('%A'):>10}  {w['total']:>7}  "
+                  f"{w['lost']:>6}  {w['loss_pct']:>6.2f}%")
+    else:
+        print(f"No {vc_window_sec}-second windows exceeded "
+              f"{vc_loss_threshold:.0f}% loss — calls would have held up.")
+
     # --- RTT over time (hourly) ---
     if recv_entries:
         print("\n" + "-" * 70)
@@ -657,8 +692,15 @@ def find_bursts(entries):
     return bursts
 
 
-def find_worst_windows(entries, window_sec=300):
-    """Slide a time window across the data and find the worst periods."""
+def find_worst_windows(entries, window_sec=300, top_n=20, min_total=1):
+    """Slide a time window across the data and find the worst periods.
+
+    Windows are deduplicated to one per non-overlapping bucket of width
+    `window_sec`, then the top `top_n` by loss percentage are returned.
+    Pass `top_n=None` to return every distinct bucket. `min_total` filters
+    out windows that don't have enough samples to be meaningful (e.g. tiny
+    tail-end windows).
+    """
     if not entries:
         return []
 
@@ -676,7 +718,7 @@ def find_worst_windows(entries, window_sec=300):
                 lost += 1
             right += 1
 
-        if total > 0 and lost > 0:
+        if total >= min_total and lost > 0:
             windows.append({
                 "start": entries[left]["epoch"],
                 "total": total,
@@ -688,7 +730,6 @@ def find_worst_windows(entries, window_sec=300):
         if entries[left]["lost"]:
             lost -= 1
 
-    # Deduplicate overlapping windows — keep best per 5-min bucket
     if not windows:
         return []
 
@@ -700,7 +741,7 @@ def find_worst_windows(entries, window_sec=300):
         if bucket not in seen_buckets:
             seen_buckets.add(bucket)
             deduped.append(w)
-        if len(deduped) >= 20:
+        if top_n is not None and len(deduped) >= top_n:
             break
 
     return deduped
