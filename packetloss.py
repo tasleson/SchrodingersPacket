@@ -467,6 +467,8 @@ def run_report(logfiles):
     print(f"Video call-killing windows ({vc_window_sec}s, >={vc_loss_threshold:.0f}% "
           f"loss): {len(all_vc_windows)}")
 
+    print_trend_summary(entries)
+
     if recv_entries:
         rtts = [e["rtt_ms"] for e in recv_entries]
         print(f"\nRTT statistics (ms):")
@@ -660,6 +662,87 @@ def run_report(logfiles):
                       f"best hour {low_hour}:00 "
                       f"({active_hours[low_hour]:.1f}% loss). "
                       f"This suggests shared congestion during peak usage.")
+
+
+def daily_loss_summary(entries, max_days=7):
+    """Group entries by local calendar date and compute per-day loss stats.
+    Returns chronologically ordered per-day stats for up to the most recent
+    `max_days` calendar days that contain data."""
+    by_date = {}
+    localtime = time.localtime
+    for e in entries:
+        tm = localtime(e["epoch"])
+        d = datetime.date(tm.tm_year, tm.tm_mon, tm.tm_mday)
+        bucket = by_date.get(d)
+        if bucket is None:
+            bucket = {"total": 0, "lost": 0}
+            by_date[d] = bucket
+        bucket["total"] += 1
+        if e["lost"]:
+            bucket["lost"] += 1
+
+    dates = sorted(by_date.keys())
+    if len(dates) > max_days:
+        dates = dates[-max_days:]
+
+    return [
+        {
+            "date": d,
+            "total": by_date[d]["total"],
+            "lost": by_date[d]["lost"],
+            "loss_pct": (by_date[d]["lost"] / by_date[d]["total"] * 100)
+                        if by_date[d]["total"] else 0.0,
+        }
+        for d in dates
+    ]
+
+
+def print_trend_summary(entries):
+    daily = daily_loss_summary(entries, max_days=7)
+    print("\n" + "-" * 70)
+    print(f"RECENT DAILY TREND (last {len(daily)} day(s) with data)")
+    print("-" * 70)
+
+    if not daily:
+        print("No daily data.")
+        return
+
+    print(f"  {'Date':<15} {'Loss%':>7}  {'Lost/Total':>16}  Bar")
+    for d in daily:
+        bar = "█" * int(d["loss_pct"] * 2)
+        date_str = d["date"].strftime("%Y-%m-%d %a")
+        ratio = f"{d['lost']}/{d['total']}"
+        print(f"  {date_str:<15} {d['loss_pct']:>6.2f}%  {ratio:>16}  {bar}")
+
+    if len(daily) < 2:
+        print("\n  Trend: insufficient data (need at least 2 days).")
+        return
+
+    n = len(daily)
+    xs = list(range(n))
+    ys = [d["loss_pct"] for d in daily]
+    mean_x = sum(xs) / n
+    mean_y = sum(ys) / n
+    num = sum((x - mean_x) * (y - mean_y) for x, y in zip(xs, ys))
+    den = sum((x - mean_x) ** 2 for x in xs)
+    slope = num / den if den else 0.0
+    net_change = slope * (n - 1)
+
+    # Classify as HOLDING if either the absolute net change across the window
+    # is tiny (< 0.1 percentage points) or it's small relative to the mean
+    # (< 20%). Otherwise the sign of the slope decides direction.
+    abs_thresh = 0.1
+    rel_thresh = 0.20
+    if (abs(net_change) < abs_thresh
+            or (mean_y > 0 and abs(net_change) / mean_y < rel_thresh)):
+        verdict = "HOLDING"
+    elif slope > 0:
+        verdict = "INCREASING"
+    else:
+        verdict = "DECREASING"
+
+    print(f"\n  Trend: {verdict}  "
+          f"(slope {slope:+.3f}%/day, net {net_change:+.2f}% over window)")
 
 
 def find_bursts(entries):
