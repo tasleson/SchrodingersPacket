@@ -1,4 +1,5 @@
 <img width="512" height="512" alt="SchrodingersPacket" src="https://github.com/user-attachments/assets/4593326c-1f68-40b2-bdf8-1de7bf19f154" />
+
 # Packet Loss Characterization Tool (PLCT)
 
 A combined client/server utility for measuring, logging, and analyzing UDP packet
