@@ -17,7 +17,7 @@ HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1">{refresh_tag}
 <title>{title}</title>
 <style>
   :root {{
@@ -120,15 +120,32 @@ def main() -> int:
         default="%Y-%m-%d %H:%M:%S %Z",
         help="strftime format for the timestamp",
     )
+    parser.add_argument(
+        "--refresh",
+        type=int,
+        default=0,
+        metavar="SECONDS",
+        help="Auto-refresh the page every N seconds (default: never)",
+    )
     args = parser.parse_args()
+
+    if args.refresh < 0:
+        parser.error("--refresh must be a non-negative integer")
 
     body = sys.stdin.read()
     timestamp = datetime.now().astimezone().strftime(args.time_format)
+
+    refresh_tag = (
+        f'\n<meta http-equiv="refresh" content="{args.refresh}">'
+        if args.refresh > 0
+        else ""
+    )
 
     page = HTML_TEMPLATE.format(
         title=html.escape(args.title),
         timestamp=html.escape(timestamp),
         content=html.escape(body),
+        refresh_tag=refresh_tag,
     )
 
     if args.output:
