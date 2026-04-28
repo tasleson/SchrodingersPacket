@@ -464,10 +464,10 @@ def run_report(logfiles):
     print(f"Received:       {len(recv_entries)}")
     print(f"Lost:           {len(lost_entries)}")
     print(f"Overall loss:   {loss_pct:.2f}%")
-    print(f"Video call-killing windows ({vc_window_sec}s, >={vc_loss_threshold:.0f}% "
+    print(f"Video call-killing windows, aka. vKill(s) ({vc_window_sec}s, >={vc_loss_threshold:.0f}% "
           f"loss): {len(all_vc_windows)}")
 
-    print_trend_summary(entries)
+    print_trend_summary(entries, all_vc_windows)
 
     if recv_entries:
         rtts = [e["rtt_ms"] for e in recv_entries]
@@ -697,7 +697,7 @@ def daily_loss_summary(entries, max_days=7):
     ]
 
 
-def print_trend_summary(entries):
+def print_trend_summary(entries, vc_windows):
     daily = daily_loss_summary(entries, max_days=7)
     print("\n" + "-" * 70)
     print(f"RECENT DAILY TREND (last {len(daily)} day(s) with data)")
@@ -707,12 +707,21 @@ def print_trend_summary(entries):
         print("No daily data.")
         return
 
-    print(f"  {'Date':<15} {'Loss%':>7}  {'Lost/Total':>16}  Bar")
+    kills_by_date = collections.Counter()
+    localtime = time.localtime
+    for w in vc_windows:
+        tm = localtime(w["start"])
+        kills_by_date[datetime.date(tm.tm_year, tm.tm_mon, tm.tm_mday)] += 1
+
+    print(f"  {'Date':<15} {'Loss%':>7}  {'Lost/Total':>16}  "
+          f"{'vKills':>5}  Bar")
     for d in daily:
         bar = "█" * int(d["loss_pct"] * 2)
         date_str = d["date"].strftime("%Y-%m-%d %a")
         ratio = f"{d['lost']}/{d['total']}"
-        print(f"  {date_str:<15} {d['loss_pct']:>6.2f}%  {ratio:>16}  {bar}")
+        kills = kills_by_date.get(d["date"], 0)
+        print(f"  {date_str:<15} {d['loss_pct']:>6.2f}%  {ratio:>16}  "
+              f"{kills:>5}  {bar}")
 
     if len(daily) < 2:
         print("\n  Trend: insufficient data (need at least 2 days).")
