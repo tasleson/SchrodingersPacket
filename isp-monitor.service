@@ -1,0 +1,28 @@
+[Unit]
+Description=ISP quality monitor (mtr probe collector)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /opt/bin/isp_monitor.py collect --db /var/lib/isp-monitor/isp_monitor.db
+Restart=on-failure
+RestartSec=30
+
+# mtr needs raw sockets
+AmbientCapabilities=CAP_NET_RAW
+CapabilityBoundingSet=CAP_NET_RAW
+
+# Hardening
+DynamicUser=yes
+StateDirectory=isp-monitor
+Environment=HOME=/var/lib/isp-monitor
+WorkingDirectory=/var/lib/isp-monitor
+ProtectSystem=strict
+ReadWritePaths=/var/lib/isp-monitor
+ProtectHome=yes
+NoNewPrivileges=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target
