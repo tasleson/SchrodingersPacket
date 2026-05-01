@@ -188,7 +188,7 @@ def cmd_report(args):
     where, params = _build_where(args)
 
     query = f"""
-        SELECT r.timestamp, r.target, h.hop, h.host, h.loss_pct,
+        SELECT datetime(r.timestamp, 'localtime'), r.target, h.hop, h.host, h.loss_pct,
                h.avg_ms, h.best_ms, h.worst_ms, h.stdev_ms, h.sent
         FROM hops h
         JOIN runs r ON h.run_id = r.id
@@ -229,7 +229,7 @@ def cmd_summary(args):
 
     # Basic stats
     row = db.execute(f"""
-        SELECT COUNT(DISTINCT r.id), MIN(r.timestamp), MAX(r.timestamp),
+        SELECT COUNT(DISTINCT r.id), MIN(datetime(r.timestamp, 'localtime')), MAX(datetime(r.timestamp, 'localtime')),
                COUNT(DISTINCT r.target)
         FROM runs r
         JOIN hops h ON h.run_id = r.id
@@ -281,7 +281,7 @@ def cmd_summary(args):
     # Worst periods — 5-minute windows with highest loss
     print(f"  --- Worst 10 periods (by packet loss, any hop) ---")
     worst = db.execute(f"""
-        SELECT r.timestamp, r.target, h.hop, h.host, h.loss_pct, h.avg_ms
+        SELECT datetime(r.timestamp, 'localtime'), r.target, h.hop, h.host, h.loss_pct, h.avg_ms
         FROM hops h
         JOIN runs r ON h.run_id = r.id
         {where}
@@ -618,7 +618,7 @@ def cmd_html(args):
 
     # Summary stats
     row = db.execute(f"""
-        SELECT COUNT(DISTINCT r.id), MIN(r.timestamp), MAX(r.timestamp)
+        SELECT COUNT(DISTINCT r.id), MIN(datetime(r.timestamp, 'localtime')), MAX(datetime(r.timestamp, 'localtime'))
         FROM runs r JOIN hops h ON h.run_id = r.id {where}
     """, params).fetchone()
 
@@ -663,7 +663,7 @@ def cmd_html(args):
         t_params = params + [target]
         t_where = (where + " AND " if where else "WHERE ") + "r.target = ?"
         rows = db.execute(f"""
-            SELECT r.timestamp, h.avg_ms, h.worst_ms, h.loss_pct
+            SELECT datetime(r.timestamp, 'localtime'), h.avg_ms, h.worst_ms, h.loss_pct
             FROM hops h JOIN runs r ON h.run_id = r.id
             {t_where}
             AND h.hop = (SELECT MAX(h2.hop) FROM hops h2 WHERE h2.run_id = r.id)
@@ -714,7 +714,7 @@ def cmd_html(args):
     db.close()
 
     data = {
-        "generated": datetime.now(timezone.utc).isoformat(),
+        "generated": datetime.now().astimezone().isoformat(),
         "summary": summary,
         "timeseries": timeseries,
         "hourly": hourly,
