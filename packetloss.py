@@ -737,21 +737,27 @@ def print_trend_summary(entries, vc_windows):
     slope = num / den if den else 0.0
     net_change = slope * (n - 1)
 
-    # Classify as HOLDING if either the absolute net change across the window
-    # is tiny (< 0.1 percentage points) or it's small relative to the mean
-    # (< 20%). Otherwise the sign of the slope decides direction.
+    # Verdict: compare the most recent day against the mean of all preceding
+    # days.  This answers "is today better or worse than recent norms?" and is
+    # robust to a single outlier day mid-window biasing the regression slope.
+    # The slope is kept as context but does not drive the verdict.
+    prev_mean = sum(ys[:-1]) / (n - 1)  # mean of all days except the last
+    current = ys[-1]
+    delta = current - prev_mean
+
     abs_thresh = 0.1
     rel_thresh = 0.20
-    if (abs(net_change) < abs_thresh
-            or (mean_y > 0 and abs(net_change) / mean_y < rel_thresh)):
+    if (abs(delta) < abs_thresh
+            or (prev_mean > 0 and abs(delta) / prev_mean < rel_thresh)):
         verdict = "HOLDING"
-    elif slope > 0:
+    elif delta > 0:
         verdict = "INCREASING"
     else:
         verdict = "DECREASING"
 
     print(f"\n  Trend: {verdict}  "
-          f"(slope {slope:+.3f}%/day, net {net_change:+.2f}% over window)")
+          f"(today {current:.2f}% vs prior {n-1}-day avg {prev_mean:.2f}%; "
+          f"slope {slope:+.3f}%/day over window)")
 
 
 def find_bursts(entries):
