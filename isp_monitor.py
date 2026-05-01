@@ -286,6 +286,7 @@ def cmd_summary(args):
         JOIN runs r ON h.run_id = r.id
         {where}
         AND h.loss_pct > 0
+        AND h.host != '???'
         ORDER BY h.loss_pct DESC, h.avg_ms DESC
         LIMIT 10
     """, params).fetchall()
@@ -315,10 +316,11 @@ def cmd_summary(args):
 
     if hop_stats:
         hw = max(len(host or '???') for _, host, *_ in hop_stats)
-        hw = max(hw, 4)  # at least as wide as "host"
+        hw = max(hw, 11)  # at least as wide as "no response"
         print(f"    {'hop':>3s} {'host':<{hw}s} {'loss%':>6s} {'avg_ms':>8s} {'jitter':>8s} {'samples':>8s}")
         for hop, host, loss, avg, stdev, count in hop_stats:
-            print(f"    {hop:>3d} {(host or '???'):<{hw}s} {loss:>5.2f}% {avg or 0:>7.1f} {stdev or 0:>7.1f} {count:>8d}")
+            display_host = "no response" if host == "???" else (host or "???")
+            print(f"    {hop:>3d} {display_host:<{hw}s} {loss:>5.2f}% {avg or 0:>7.1f} {stdev or 0:>7.1f} {count:>8d}")
     print()
 
     # Hourly pattern
@@ -410,6 +412,7 @@ HTML_TEMPLATE = """\
   .latency-ok { color: #4caf50; }
   .latency-warn { color: #ff9800; }
   .latency-bad { color: #f44336; }
+  .hop-no-response td { color: #555; font-style: italic; }
   footer { margin-top: 2rem; font-size: 0.75rem; color: #555; text-align: center; }
 </style>
 </head>
@@ -582,11 +585,19 @@ document.getElementById('genTime').textContent = DATA.generated;
 
   let html = '<table><thead><tr><th>Target</th><th>Hop</th><th>Host</th><th>Loss %</th><th>Avg ms</th><th>Best ms</th><th>Worst ms</th><th>StDev</th></tr></thead><tbody>';
   DATA.latest_hops.forEach(function(h) {
-    html += '<tr><td>' + h.target + '</td><td>' + h.hop + '</td><td>' + (h.host||'???') +
-            '</td><td class="' + lossClass(h.loss) + '">' + h.loss.toFixed(1) + '%</td>' +
-            '<td class="' + latClass(h.avg) + '">' + fmt(h.avg) + '</td>' +
-            '<td>' + fmt(h.best) + '</td><td>' + fmt(h.worst) + '</td>' +
-            '<td>' + fmt(h.stdev) + '</td></tr>';
+    var noResp = !h.host || h.host === '???';
+    var rowClass = noResp ? ' class="hop-no-response"' : '';
+    var hostDisplay = noResp ? 'no response' : h.host;
+    if (noResp) {
+      html += '<tr' + rowClass + '><td>' + h.target + '</td><td>' + h.hop + '</td><td>' + hostDisplay +
+              '</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td></tr>';
+    } else {
+      html += '<tr><td>' + h.target + '</td><td>' + h.hop + '</td><td>' + hostDisplay +
+              '</td><td class="' + lossClass(h.loss) + '">' + h.loss.toFixed(1) + '%</td>' +
+              '<td class="' + latClass(h.avg) + '">' + fmt(h.avg) + '</td>' +
+              '<td>' + fmt(h.best) + '</td><td>' + fmt(h.worst) + '</td>' +
+              '<td>' + fmt(h.stdev) + '</td></tr>';
+    }
   });
   html += '</tbody></table>';
   el.innerHTML = html;
