@@ -56,7 +56,7 @@ _BASE_STYLES = """
   }
   header {
     width: 100%;
-    max-width: 960px;
+    max-width: 1040px;
     margin-bottom: 1.25rem;
     text-align: center;
   }
@@ -95,7 +95,7 @@ STDIN_TEMPLATE = """<!DOCTYPE html>
 {base_styles}
   main {{
     width: 100%;
-    max-width: 960px;
+    max-width: 1040px;
     background: var(--card-bg);
     border: 1px solid var(--card-border);
     border-radius: 10px;
@@ -127,7 +127,7 @@ TABS_TEMPLATE = """<!DOCTYPE html>
 {base_styles}
   .tabbed {{
     width: 100%;
-    max-width: 960px;
+    max-width: 1040px;
   }}
   .tab-nav {{
     display: flex;
