@@ -326,7 +326,7 @@ def cmd_summary(args):
     # Hourly pattern
     print(f"  --- Hourly pattern (final hop, avg loss %) ---")
     hourly = db.execute(f"""
-        SELECT CAST(strftime('%H', r.timestamp) AS INTEGER) as hour,
+        SELECT CAST(strftime('%H', datetime(r.timestamp, 'localtime')) AS INTEGER) as hour,
                AVG(h.loss_pct), AVG(h.avg_ms)
         FROM hops h
         JOIN runs r ON h.run_id = r.id
@@ -350,7 +350,7 @@ def cmd_summary(args):
     print(f"  --- Day-of-week pattern (final hop, avg loss %) ---")
     days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
     daily = db.execute(f"""
-        SELECT CAST(strftime('%w', r.timestamp) AS INTEGER) as dow,
+        SELECT CAST(strftime('%w', datetime(r.timestamp, 'localtime')) AS INTEGER) as dow,
                AVG(h.loss_pct), AVG(h.avg_ms)
         FROM hops h
         JOIN runs r ON h.run_id = r.id
@@ -680,7 +680,7 @@ def cmd_html(args):
         t_params = params + [target]
         t_where = (where + " AND " if where else "WHERE ") + "r.target = ?"
         rows = db.execute(f"""
-            SELECT CAST(strftime('%H', r.timestamp) AS INTEGER) as hour,
+            SELECT CAST(strftime('%H', datetime(r.timestamp, 'localtime')) AS INTEGER) as hour,
                    AVG(h.loss_pct), AVG(h.avg_ms)
             FROM hops h JOIN runs r ON h.run_id = r.id
             {t_where}
