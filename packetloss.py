@@ -893,7 +893,7 @@ def main():
         run_client(args.host, args.port, args.interval, args.size,
                    args.timeout, args.duration, logfile)
     elif args.mode == "report":
-        run_report(args.logfile)  # nargs="+" → list
+        run_report(sorted(args.logfile, key=os.path.basename))
 
 
 if __name__ == "__main__":
